@@ -1,44 +1,45 @@
 from datetime import datetime
-import io
 import os
 from github import Github
-from openai import OpenAI
+from google import genai
 from PIL import Image
 import streamlit as st
 
 st.set_page_config(
-    page_title="Zabawna Galeria AI dla Par 💖", page_icon="📸", layout="centered"
+    page_title="Zabawna Galeria dla Par 💖", page_icon="📸", layout="centered"
 )
 
-st.title("Nasza Szalona Galeria AI 🤪💖")
+st.title("Nasza Szalona Galeria Par 🤪💖")
 st.write(
-    "Wrzućcie zdjęcie, a AI przerobi je w zabawny sposób i dopisze kąśliwy"
-    " żart!"
+    "Wrzućcie zdjęcie, a darmowe AI od Google dopisze do niego przezabawny"
+    " komentarz!"
 )
 
-# --- Konfiguracja Kluczy (GitHub + OpenAI) ---
+# --- Konfiguracja Kluczy (GitHub + Google Gemini) ---
 try:
   GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
   REPO_NAME = st.secrets["REPO_NAME"]
-  OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+  GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 except Exception:
-  st.error("Brak skonfigurowanych sekretów w Streamlit (GitHub / OpenAI)!")
+  st.error(
+      "Brak skonfigurowanych sekretów w Streamlit (GitHub / GEMINI_API_KEY)!"
+  )
   st.stop()
 
 # Inicjalizacja klientów
 g = Github(GITHUB_TOKEN)
 repo = g.get_repo(REPO_NAME)
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
-# --- Wybór stylu przeróbki AI ---
-st.subheader("1. Wybierz styl dla swojej połówki 🎭")
+# --- Wybór stylu przeróbki ---
+st.subheader("1. Wybierz szaloną sytuację 🎭")
 style_choice = st.selectbox(
-    "Kim dzisiaj jesteśmy?",
+    "Kim dzisiaj jesteś na zdjęciu?",
     [
-        "Safari Explorer (poszukiwacz przygód z małpką)",
-        "Groźny Pirat z mapą skarbów",
-        "Kosmonauta zgubiony w galaktyce",
-        "Średniowieczny rycerz walczący z tosterem",
+        "Zagubiony poszukiwacz przygód na safari z małpką",
+        "Groźny pirat szukający ukrytego skarbu w salonie",
+        "Kosmonauta, który ląduje na kanapie",
+        "Średniowieczny rycerz walczący z pilotem od telewizora",
     ],
 )
 
@@ -49,78 +50,54 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file is not None:
-  # Podgląd oryginału
   original_image = Image.open(uploaded_file)
-  st.image(
-      original_image,
-      caption="Oryginalna fotka do przeróbki",
-      width=300,
-  )
+  st.image(original_image, caption="Twoje zdjęcie", width=300)
 
-  if st.button("Odpal magię AI! 🚀"):
-    with st.spinner(
-        "AI analizuje minę i tworzy żart oraz awatar... (To może chwilę"
-        " potrwać) ⏳"
-    ):
+  if st.button("Generuj żart i zapisz w galerii! 🚀"):
+    with st.spinner("AI myśli nad złośliwym i śmiesznym żartem... ⏳"):
       try:
-        # Krok A: Generowanie żartobliwego komentarza przez GPT
+        # Generowanie żartu przez darmowy model Gemini
         prompt_text = (
-            f"Napisz bardzo krótki, żartobliwy i zgryźliwy komentarz"
-            f" w języku polskim do zdjęcia w stylizacji: {style_choice}."
-            f" Styl rodem z zabawnych memów dla par."
+            f"Napisz krótki, bardzo żartobliwy i zgryźliwy komentarz"
+            f" w języku polskim (styl memów dla par) do sytuacji, w której"
+            f" ta osoba robi minę jak na zdjęciu i bierze udział w scenariuszu:"
+            f" {style_choice}. Maksymalnie 2 zdania."
         )
 
-        response_text = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt_text}],
-            max_tokens=60,
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt_text,
         )
-        funny_comment = response_text.choices[0].message.content.strip()
+        funny_comment = response.text.strip()
 
-        # Krok B: Generowanie obrazu w stylu AI (DALL-E 3)
-        # W praktyce produkcyjnej najlepiej przesłać obraz do DALL-E edycji lub wygenerować nowy na podstawie stylu
-        prompt_image = (
-            f"A funny, high-quality cartoon caricature illustration in comic"
-            f" book style showing a person in a funny scenario: {style_choice},"
-            f" vibrant colors, humorous."
-        )
-
-        response_img = client.images.generate(
-            model="dall-e-3",
-            prompt=prompt_image,
-            size="1024x1024",
-            quality="standard",
-            n=1,
-        )
-        image_url = response_img.data[0].url
-
-        # Pobranie wygenerowanego przez AI obrazka
-        import requests
-
-        img_data = requests.get(image_url).content
-
-        # Krok C: Zapis na GitHubie (obrazek + plik tekstowy z komentarzem)
+        # Zapis oryginału zdjęcia oraz pliku tekstowego z komentarzem na GitHubie
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_name_img = f"photos/{timestamp}_ai.jpg"
+        file_name_img = f"photos/{timestamp}_img.jpg"
         file_name_txt = f"photos/{timestamp}_comment.txt"
 
-        # Zapisujemy obrazek
+        # Zapisujemy zdjęcie tymczasowo
+        temp_path = "temp.jpg"
+        original_image.save(temp_path)
+        with open(temp_path, "rb") as f:
+          img_content = f.read()
+
+        # Wysyłka do repozytorium GitHub
         repo.create_file(
             path=file_name_img,
-            message=f"AI Image {timestamp}",
-            content=img_data,
+            message=f"Photo {timestamp}",
+            content=img_content,
             branch="main",
         )
 
-        # Zapisujemy komentarz
         repo.create_file(
             path=file_name_txt,
-            message=f"AI Comment {timestamp}",
+            message=f"Comment {timestamp}",
             content=funny_comment,
             branch="main",
         )
 
-        st.success("Gotowe! Obrazek został przerobiony i zapisany! 🎉")
+        os.remove(temp_path)
+        st.success("Super! Zdjęcie i żart zostały dodane do wspólnej galerii! 🎉")
         st.rerun()
 
       except Exception as e:
@@ -128,22 +105,20 @@ if uploaded_file is not None:
 
 st.divider()
 
-# --- Sekcja: Galeria Waszych Wspomnień z AI ---
-st.subheader("🖼️ Wasza Galeria Szalonych Przeróbek")
+# --- Sekcja: Galeria Wspomnień ---
+st.subheader("🖼️ Wasza Wspólna Galeria")
 
 
-@st.cache_data(ttl=30)
-def load_ai_gallery():
+@st.cache_data(ttl=15)
+def load_gallery():
   try:
     contents = repo.get_contents("photos")
-    # Filtrujemy tylko pliki jpg
-    images = [f for f in contents if f.name.endswith("_ai.jpg")]
+    images = [f for f in contents if f.name.endswith("_img.jpg")]
     images = sorted(images, key=lambda x: x.name, reverse=True)
 
     gallery = []
     for img in images:
-      base_name = img.name.replace("_ai.jpg", "")
-      # Szukamy odpowiadającego pliku z komentarzem
+      base_name = img.name.replace("_img.jpg", "")
       comment_path = f"photos/{base_name}_comment.txt"
       comment_text = "Brak komentarza"
       try:
@@ -160,16 +135,13 @@ def load_ai_gallery():
     return []
 
 
-gallery_items = load_ai_gallery()
+gallery_items = load_gallery()
 
 if not gallery_items:
-  st.info(
-      "Brak przerobionych zdjęć w galerii. Użyj formularza wyżej, aby stworzyć"
-      " pierwszy mem! 💕"
-  )
+  st.info("Brak zdjęć w galerii. Dodajcie pierwsze wspomnienie wyżej! 💕")
 else:
   for item in gallery_items:
-    # Wyświetlanie w stylu "dymku czatu" jak na Twoim szkicu
-    st.markdown(f"> 💬 **Dymek AI:** *{item['comment']}*")
+    # Stylizacja dymku czatu z żartem nad zdjęciem
+    st.markdown(f"💬 **Komentarz AI:** *{item['comment']}*")
     st.image(item["img_url"], use_container_width=True)
     st.write("---")
