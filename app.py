@@ -65,7 +65,7 @@ if uploaded_file is not None:
         )
 
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=prompt_text,
         )
         funny_comment = response.text.strip()
